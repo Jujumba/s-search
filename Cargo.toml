@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "s-search-bot",
+    "s-html-parser"
+]
