@@ -16,12 +16,6 @@ impl Tokenizer {
         }
     }
     pub fn next_token(&self) -> Token {
-        self.next_token_raw(false)
-    }
-    pub fn next_token_by_word(&self) -> Token {
-        self.next_token_raw(true)
-    }
-    fn next_token_raw(&self, word_by_word: bool) -> Token {
         let mut head = self.head.borrow_mut();
         let head_deref = *head;
 
@@ -35,17 +29,11 @@ impl Tokenizer {
             return token;
         }
 
-        let closure = if word_by_word {
-            |c: char| c.is_whitespace()
-        } else {
-            |_c: char| false
-        };
-
         let pos = self // relative to the `self.head`
             .content
             .chars()
             .skip(head_deref)
-            .position(|c| c == '<' || c == '>' || closure(c))
+            .position(|c| c == '<' || c == '>')
             .unwrap_or(self.content.len() - head_deref);
 
         let end = head_deref + pos;
@@ -56,7 +44,7 @@ impl Tokenizer {
             return Token::Eof;
         }
 
-        Token::Text(s.into())
+        Token::text(s)
     }
 }
 
