@@ -25,13 +25,13 @@ use crate::token::{Token, TokenKind, Tokenizer};
 /// assert_eq!(seq[3], Element::tag("p", HashMap::new()));
 /// assert!(seq.get(4).is_none());
 /// ```
-pub struct Parser<'a> {
-    pub(crate) tokenizer: Tokenizer<'a>,
+pub struct Parser<'a, 'b> {
+    pub(crate) tokenizer: Tokenizer<'a, 'b>,
 }
-impl<'a> Parser<'a> {
+impl<'a, 'b> Parser<'a, 'b> where 'b: 'a {
     pub fn new<A>(content: A) -> Self
     where
-        A: Into<Cow<'a, str>>,
+        A: Into<&'b str>,
     {
         Self {
             tokenizer: Tokenizer::new(content),

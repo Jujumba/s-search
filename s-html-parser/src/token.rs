@@ -1,21 +1,23 @@
-use std::{borrow::Cow, cell::RefCell};
+use std::{borrow::Cow, cell::RefCell, marker::PhantomData};
 
 use crate::{element::Element, error::TokenError};
-pub(crate) struct Tokenizer<'a> {
+pub(crate) struct Tokenizer<'a, 'b> {
     head: RefCell<usize>,
-    content: Cow<'a, str>, // todo: may be I should use a borrowed string
+    content: &'b str,
+    ph: PhantomData<&'a ()>
 }
-impl<'a> Tokenizer<'a> {
+impl<'a, 'b> Tokenizer<'a, 'b> where 'b: 'a {
     pub fn new<I>(content: I) -> Self
     where
-        I: Into<Cow<'a, str>>,
+        I: Into<&'b str>,
     {
         Self {
             head: RefCell::new(0usize),
             content: content.into(),
+            ph: PhantomData
         }
     }
-    pub fn next_token(&'a self) -> Token<'a> {
+    pub fn next_token(&'a self) -> Token<'b> {
         let mut head = self.head.borrow_mut();
         let head_deref = *head;
         let len = self.content.len();
@@ -38,7 +40,7 @@ impl<'a> Tokenizer<'a> {
             .unwrap_or(self.content.len() - head_deref);
 
         let end = head_deref + pos;
-        let s = &self.content[head_deref..end];
+        let s: &'b str = &self.content[head_deref..end];
 
         *head += pos;
         if s.is_empty() {
@@ -64,6 +66,17 @@ impl<'a> Tokenizer<'a> {
         let text: &'a str = &self.content[start..end];
         let kind = TokenKind::text(text);
         Token::new(start, end - start, kind)
+    }
+}
+impl<'a, 'b> Iterator for Tokenizer<'a, 'b> where 'b: 'a {
+    type Item = Token<'b>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let token = self.next_token();
+        if token.kind != TokenKind::Eof {
+            Some(token)
+        } else {
+            None
+        }
     }
 }
 #[allow(clippy::from_over_into)]
