@@ -1,79 +1,104 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::element::{Element, UnstructuredSequence};
 use crate::error::ParseError;
 use crate::on_err;
-use crate::token::{Token, Tokenizer};
+use crate::token::{Token, TokenKind, Tokenizer};
 
+macro_rules! expect_token {
+    ($parser:expr, $pat:pat) => {
+        let $pat = $parser.tokenizer.next_token().kind else {
+            return Err($crate::error::ParseError::Unexpected);
+        };
+    };
+}
 /// The unstructured parser.
 /// Does not build the tree of elements or whatever.
 /// Such parser never fails, it does not ensure HTML correctness.
 /// ```
 /// use std::collections::HashMap;
-/// 
+///
 /// use crate::s_html_parser::element::{Element, UnstructuredSequence};
 /// use crate::s_html_parser::parser::Parser;
-/// 
+///
 /// let parser = Parser::new("<p> Hello! </p>");
 /// let seq: UnstructuredSequence  = parser.parse();
-/// 
+///
 /// // an element with empty attributes
 /// assert_eq!(seq[0], Element::tag("p", HashMap::new()));
-/// assert_eq!(seq[1], Element::text("Hello!"));
-/// assert_eq!(seq[2], Element::tag("p", HashMap::new()));
-/// assert!(seq.get(3).is_none());
+/// assert_eq!(seq[1], Element::text(" Hello"));
+/// assert_eq!(seq[2], Element::text("!"));
+/// assert_eq!(seq[3], Element::tag("p", HashMap::new()));
+/// assert!(seq.get(4).is_none());
 /// ```
-pub struct Parser {
-    pub(crate) tokenizer: Tokenizer,
+pub struct Parser<'a> {
+    pub(crate) tokenizer: Tokenizer<'a>,
 }
-impl Parser {
-    pub fn new<A>(content: A) -> Self where A: Into<String> {
+impl<'a> Parser<'a> {
+    pub fn new<A>(content: A) -> Self
+    where
+        A: Into<Cow<'a, str>>,
+    {
         Self {
             tokenizer: Tokenizer::new(content),
         }
     }
     pub fn parse(&self) -> UnstructuredSequence {
         let mut seq = UnstructuredSequence::default();
+
         loop {
-            let element = match self.tokenizer.next_token() {
-                Token::LAngle => on_err!(self.parse_tag(), continue),
-                Token::Text(s) => s.into(),
-                Token::Eof => break,
-                _ => continue // todo: we don't care about the erroneous tag now, but may in the future
+            let token = self.tokenizer.next_token();
+            let element = match token.kind.clone() {
+                TokenKind::LAngle => on_err!(self.parse_tag(token), continue),
+                TokenKind::Text(s) if !s.trim().is_empty() => s.into(),
+                TokenKind::Eof => break,
+                // it would be better if I would merge all text elements in a row in to a single one
+                _ if !self.tokenizer.token_to_str_empty(&token) => self.tokenizer.token_to_text_element(&token),
+                _ => continue
             };
             seq.push(element);
         }
+
         seq
     }
-    fn parse_tag(&self) -> Result<Element, ParseError> {
-        let ident = match self.tokenizer.next_token() {
-            Token::Text(ident) => ident,
-            Token::Exclamation | Token::Backslash => {
-                let Token::Text(ident) = self.tokenizer.next_token() else {
-                    return Err(ParseError::Unexpected);
-                };
+    fn parse_tag(&'a self, langle: Token<'a>) -> Result<Element<'a>, ParseError> {
+        let token: Token<'a> = self.tokenizer.next_token();
+        let ident = match token.kind.clone() {
+            TokenKind::Text(ident) if ident.starts_with(' ') => {
+                let merged: Element<'a> =
+                    self.tokenizer.concat(&langle, &token).try_into().unwrap();
+                return Ok(merged);
+            }
+            TokenKind::Text(ident) => ident,
+            TokenKind::Exclamation => match self.tokenizer.next_token().kind {
+                TokenKind::Text(tag) if tag == "--" => {
+                    todo!("skip to end of comment tag and return it")
+                }
+                TokenKind::Text(tag) => tag,
+                _ => return Err(ParseError::Unexpected),
+            },
+            TokenKind::Backslash => {
+                expect_token!(self, TokenKind::Text(ident));
                 ident
             }
             _ => return Err(ParseError::Unexpected),
         };
 
         let mut attrs = HashMap::new();
-        let mut token = self.tokenizer.next_token();
         loop {
-            if matches!(token, Token::RAngle) {
+            let token_kind = self.tokenizer.next_token().kind;
+            if matches!(token_kind, TokenKind::RAngle) {
+                break;
+            }
+            if matches!(token_kind, TokenKind::Backslash) {
+                expect_token!(self, TokenKind::RAngle);
                 break
             }
-            let Token::Text(key) = token else {
-                return Err(ParseError::Unexpected);
-            };
-            let Token::Equals = self.tokenizer.next_token() else {
-                return Err(ParseError::Unexpected);
-            };
-            let Token::Text(value) = self.tokenizer.next_token() else {
-                return Err(ParseError::Unexpected);
-            };
+            expect_token!(self, TokenKind::Text(key));
+            expect_token!(self, TokenKind::Equals);
+            expect_token!(self, TokenKind::Text(value));
             attrs.insert(key, value);
-            token = self.tokenizer.next_token();
         }
 
         Ok(Element::Tag { ident, attrs })
