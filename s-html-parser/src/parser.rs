@@ -3,16 +3,9 @@ use std::collections::HashMap;
 
 use crate::element::{Element, UnstructuredSequence};
 use crate::error::ParseError;
-use crate::on_err;
+use crate::{on_err, expect_token};
 use crate::token::{Token, TokenKind, Tokenizer};
 
-macro_rules! expect_token {
-    ($parser:expr, $pat:pat) => {
-        let $pat = $parser.tokenizer.next_token().kind else {
-            return Err($crate::error::ParseError::Unexpected);
-        };
-    };
-}
 /// The unstructured parser.
 /// Does not build the tree of elements or whatever.
 /// Such parser never fails, it does not ensure HTML correctness.
@@ -79,7 +72,7 @@ impl<'a> Parser<'a> {
                 _ => return Err(ParseError::Unexpected),
             },
             TokenKind::Backslash => {
-                expect_token!(self, TokenKind::Text(ident));
+                expect_token!(self, TokenKind::Text(ident), Err(ParseError::Unexpected));
                 ident
             }
             _ => return Err(ParseError::Unexpected),
@@ -92,12 +85,12 @@ impl<'a> Parser<'a> {
                 break;
             }
             if matches!(token_kind, TokenKind::Backslash) {
-                expect_token!(self, TokenKind::RAngle);
+                expect_token!(self, TokenKind::RAngle, Err(ParseError::Unexpected));
                 break
             }
-            expect_token!(self, TokenKind::Text(key));
-            expect_token!(self, TokenKind::Equals);
-            expect_token!(self, TokenKind::Text(value));
+            expect_token!(self, TokenKind::Text(key), Err(ParseError::Unexpected));
+            expect_token!(self, TokenKind::Equals, Err(ParseError::Unexpected));
+            expect_token!(self, TokenKind::Text(value), Err(ParseError::Unexpected));
             attrs.insert(key, value);
         }
 
