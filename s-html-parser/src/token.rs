@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cell::RefCell, marker::PhantomData};
+use std::{borrow::Cow, cell::{RefCell, RefMut}, marker::PhantomData};
 
 use crate::{element::Element, error::TokenError};
 pub(crate) struct Tokenizer<'a, 'b> {
@@ -18,13 +18,20 @@ impl<'a, 'b> Tokenizer<'a, 'b> where 'b: 'a {
         }
     }
     pub fn next_token(&'a self) -> Token<'b> {
-        let mut head = self.head.borrow_mut();
-        let head_deref = *head;
+        let mut head = self.get_head();
+        
         let len = self.content.len();
 
-        if head_deref >= len {
+        if *head >= len {
             return Token::eof(len);
         }
+
+        let Some(pos) = self.content.chars().skip(*head).position(|c| !c.is_whitespace()) else {
+            return Token::eof(*head);
+        };
+
+        *head += pos;
+        let head_deref = *head;
 
         let current_char = self.content.chars().nth(head_deref).unwrap();
         if let Ok(kind) = current_char.try_into() {
@@ -36,7 +43,7 @@ impl<'a, 'b> Tokenizer<'a, 'b> where 'b: 'a {
             .content
             .chars()
             .skip(head_deref)
-            .position(|c| <char as TryInto<TokenKind>>::try_into(c).is_ok())
+            .position(|c| <char as TryInto<TokenKind>>::try_into(c).is_ok() || c.is_whitespace())
             .unwrap_or(self.content.len() - head_deref);
 
         let end = head_deref + pos;
@@ -49,6 +56,14 @@ impl<'a, 'b> Tokenizer<'a, 'b> where 'b: 'a {
 
         Token::new(head_deref, pos, TokenKind::text(s))
     }
+    pub fn has_spaces(&self) -> bool {
+        let head = *self.get_head();
+        self.content.chars().nth(head).unwrap().is_whitespace()
+    }
+    #[inline]
+    fn get_head(&self) -> RefMut<usize> {
+        self.head.borrow_mut()
+    }
     pub fn token_to_str(&'a self, token: &Token<'a>) -> &'a str {
         let end = token.start + token.len;
         &self.content[token.start..end]
@@ -59,13 +74,6 @@ impl<'a, 'b> Tokenizer<'a, 'b> where 'b: 'a {
     pub fn token_to_text_element(&'a self, token: &Token<'a>) -> Element<'a> {
         let text: Cow<'a, str> = self.token_to_str(token).into();
         Element::text(text)
-    }
-    pub fn concat(&'a self, t1: &Token<'a>, t2: &Token<'a>) -> Token<'a> {
-        let start = t1.start;
-        let end = t1.start + t1.len + t2.len;
-        let text: &'a str = &self.content[start..end];
-        let kind = TokenKind::text(text);
-        Token::new(start, end - start, kind)
     }
 }
 impl<'a, 'b> Iterator for Tokenizer<'a, 'b> where 'b: 'a {

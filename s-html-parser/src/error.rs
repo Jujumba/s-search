@@ -18,11 +18,13 @@ impl error::Error for TokenError {}
 pub enum ParseError {
     // todo: we may be interested in what is unexpected
     Unexpected,
+    Useless,
 }
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unexpected => write!(f, "unexpected"),
+            Self::Useless => write!(f, "useless"),
         }
     }
 }

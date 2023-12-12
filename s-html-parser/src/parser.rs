@@ -1,8 +1,6 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::element::{Element, UnstructuredSequence};
-use crate::error::ParseError;
 use crate::{on_err, expect_token};
 use crate::token::{Token, TokenKind, Tokenizer};
 
@@ -20,7 +18,7 @@ use crate::token::{Token, TokenKind, Tokenizer};
 ///
 /// // an element with empty attributes
 /// assert_eq!(seq[0], Element::tag("p", HashMap::new()));
-/// assert_eq!(seq[1], Element::text(" Hello"));
+/// assert_eq!(seq[1], Element::text("Hello"));
 /// assert_eq!(seq[2], Element::text("!"));
 /// assert_eq!(seq[3], Element::tag("p", HashMap::new()));
 /// assert!(seq.get(4).is_none());
@@ -42,8 +40,8 @@ impl<'a, 'b> Parser<'a, 'b> where 'b: 'a {
 
         loop {
             let token = self.tokenizer.next_token();
-            let element = match token.kind.clone() {
-                TokenKind::LAngle => on_err!(self.parse_tag(token), continue),
+            let element = match token.kind {
+                TokenKind::LAngle => on_err!(self.parse_tag(), continue),
                 TokenKind::Text(s) if !s.trim().is_empty() => s.into(),
                 TokenKind::Eof => break,
                 // it would be better if I would merge all text elements in a row in to a single one
@@ -55,27 +53,26 @@ impl<'a, 'b> Parser<'a, 'b> where 'b: 'a {
 
         seq
     }
-    fn parse_tag(&'a self, langle: Token<'a>) -> Result<Element<'a>, ParseError> {
+    fn parse_tag(&'a self) -> Option<Element<'a>> {
+        if self.tokenizer.has_spaces() {
+            return Some(Element::text("<"));
+        }
         let token: Token<'a> = self.tokenizer.next_token();
         let ident = match token.kind.clone() {
-            TokenKind::Text(ident) if ident.starts_with(' ') => {
-                let merged: Element<'a> =
-                    self.tokenizer.concat(&langle, &token).try_into().unwrap();
-                return Ok(merged);
-            }
             TokenKind::Text(ident) => ident,
             TokenKind::Exclamation => match self.tokenizer.next_token().kind {
                 TokenKind::Text(tag) if tag == "--" => {
-                    todo!("skip to end of comment tag and return it")
+                    self.skip_comment();
+                    return None;
                 }
                 TokenKind::Text(tag) => tag,
-                _ => return Err(ParseError::Unexpected),
+                _ => return None,
             },
             TokenKind::Backslash => {
-                expect_token!(self, TokenKind::Text(ident), Err(ParseError::Unexpected));
+                expect_token!(self, TokenKind::Text(ident), None);
                 ident
             }
-            _ => return Err(ParseError::Unexpected),
+            _ => return None,
         };
 
         let mut attrs = HashMap::new();
@@ -85,15 +82,29 @@ impl<'a, 'b> Parser<'a, 'b> where 'b: 'a {
                 break;
             }
             if matches!(token_kind, TokenKind::Backslash) {
-                expect_token!(self, TokenKind::RAngle, Err(ParseError::Unexpected));
+                expect_token!(self, TokenKind::RAngle, None);
                 break
             }
-            expect_token!(self, TokenKind::Text(key), Err(ParseError::Unexpected));
-            expect_token!(self, TokenKind::Equals, Err(ParseError::Unexpected));
-            expect_token!(self, TokenKind::Text(value), Err(ParseError::Unexpected));
+            expect_token!(self, TokenKind::Text(key), None);
+            expect_token!(self, TokenKind::Equals, None);
+            expect_token!(self, TokenKind::Text(value), None);
             attrs.insert(key, value);
         }
 
-        Ok(Element::Tag { ident, attrs })
+        Some(Element::tag(ident, attrs))
+    }
+    // should only be called *after* a comment tag (<!--)
+    fn skip_comment(&'a self) {
+        loop {
+            let token = self.tokenizer.next_token();
+            if let TokenKind::Text(s) = token.kind { // sorry
+                if s == "--" {
+                    let next = self.tokenizer.next_token();
+                    if matches!(next.kind, TokenKind::RAngle) {
+                        break;
+                    }
+                }
+            }
+        }
     }
 }
